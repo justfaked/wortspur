@@ -48,6 +48,18 @@
 
     <footer class="footer">
       <button id="start-btn" class="primary">Spiel starten</button>
+      <form id="join-form" class="join-form" autocomplete="off">
+        <label for="join-input">Raum beitreten:</label>
+        <input
+          id="join-input"
+          type="text"
+          maxlength="5"
+          placeholder="Code"
+          spellcheck="false"
+          autocapitalize="characters"
+        />
+        <button type="submit">Beitreten</button>
+      </form>
       <div id="room-info" class="room-info hidden">
         <span>Raum: <strong id="room-code">&mdash;</strong></span>
         <button id="copy-link-btn" type="button">Link kopieren</button>
@@ -65,8 +77,10 @@
     <div id="game-over" class="overlay hidden" aria-hidden="true">
       <div class="overlay-content">
         <h2>Spiel beendet!</h2>
-        <p>Endpunktzahl: <span id="final-score">0</span></p>
-        <p><span id="final-count">0</span> Wörter gefunden.</p>
+        <p>Punkte: <strong id="final-score">0</strong></p>
+        <p><span id="final-count">0</span> Wörter</p>
+        <p class="hint">Klicke auf ein Wort, um es zu streichen (z.&thinsp;B. Duplikat oder ungültig). Erneut klicken stellt es wieder her.</p>
+        <ul id="final-words-list" class="final-words-list"></ul>
         <button id="restart-btn" class="primary">Neues Spiel</button>
       </div>
     </div>

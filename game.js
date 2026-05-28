@@ -222,6 +222,8 @@ const state = {
   foundWords: new Set(),
   timerId: null,
   roomCode: null,
+  dragging: false,
+  dragPath: [], // [{r, c}, ...]
 };
 
 /* ===== DOM ===== */
@@ -241,11 +243,14 @@ const els = {
   overlay: document.getElementById('game-over'),
   finalScore: document.getElementById('final-score'),
   finalCount: document.getElementById('final-count'),
+  finalWordsList: document.getElementById('final-words-list'),
   restartBtn: document.getElementById('restart-btn'),
   roomInfo: document.getElementById('room-info'),
   roomCodeEl: document.getElementById('room-code'),
   copyLinkBtn: document.getElementById('copy-link-btn'),
   revealBtn: document.getElementById('reveal-btn'),
+  joinForm: document.getElementById('join-form'),
+  joinInput: document.getElementById('join-input'),
 };
 els.timerStat = els.timer.closest('.stat');
 
@@ -398,8 +403,44 @@ function endGame() {
   }
   els.input.disabled = true;
   els.submitBtn.disabled = true;
-  els.finalScore.textContent = String(state.score);
-  els.finalCount.textContent = String(state.foundWords.size);
+
+  // Wortliste im Overlay aufbauen
+  els.finalWordsList.innerHTML = '';
+  const words = Array.from(state.foundWords);
+  const struckWords = new Set();
+
+  function updateFinalScoreDisplay() {
+    let activeCount = 0;
+    let activeScore = 0;
+    for (const w of words) {
+      if (!struckWords.has(w)) {
+        activeCount++;
+        activeScore += scoreFor(w.length);
+      }
+    }
+    els.finalScore.textContent = String(activeScore);
+    els.finalCount.textContent = String(activeCount);
+  }
+
+  for (const word of words) {
+    const li = document.createElement('li');
+    const display = word.charAt(0) + word.slice(1).toLowerCase();
+    const pts = scoreFor(word.length);
+    li.innerHTML = `${display}<span class="pts">+${pts}</span>`;
+    li.addEventListener('click', () => {
+      if (struckWords.has(word)) {
+        struckWords.delete(word);
+        li.classList.remove('struck');
+      } else {
+        struckWords.add(word);
+        li.classList.add('struck');
+      }
+      updateFinalScoreDisplay();
+    });
+    els.finalWordsList.appendChild(li);
+  }
+
+  updateFinalScoreDisplay();
   els.overlay.classList.remove('hidden');
 }
 
@@ -459,12 +500,178 @@ els.copyLinkBtn.addEventListener('click', () => {
   });
 });
 
+// Raum beitreten
+els.joinForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const code = els.joinInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length < ROOM_CODE_LENGTH) {
+    setMessage(`Bitte ${ROOM_CODE_LENGTH}-stelligen Raum-Code eingeben.`, 'bad');
+    return;
+  }
+  // Code in URL setzen und Raum-Setup starten
+  state.roomCode = null; // Reset, damit setupRoom den neuen Code übernimmt
+  setRoomInURL(code);
+  setupRoom();
+  els.joinInput.value = '';
+});
+
 // Eingabe nur erlaubte Zeichen filtern (Buchstaben, Umlaute, ß)
 els.input.addEventListener('input', () => {
   const cleaned = els.input.value.replace(/[^a-zA-ZäöüÄÖÜß]/g, '');
   if (cleaned !== els.input.value) {
     els.input.value = cleaned;
   }
+});
+
+/* ===== Swipe/Drag-Eingabe ===== */
+
+/**
+ * Ermittelt die Tile-Koordinaten {r, c} an einem Bildschirmpunkt, oder null.
+ */
+function getTileFromPoint(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el || !el.classList.contains('tile')) return null;
+  const r = parseInt(el.dataset.r, 10);
+  const c = parseInt(el.dataset.c, 10);
+  if (isNaN(r) || isNaN(c)) return null;
+  return { r, c };
+}
+
+/**
+ * Prüft, ob zwei Felder benachbart sind (inkl. diagonal).
+ */
+function isAdjacent(a, b) {
+  return Math.abs(a.r - b.r) <= 1 && Math.abs(a.c - b.c) <= 1 && !(a.r === b.r && a.c === b.c);
+}
+
+/**
+ * Setzt die visuelle Markierung aller Tiles im aktuellen Pfad.
+ */
+function updateDragVisuals() {
+  // Alle Tiles zurücksetzen
+  const tiles = els.board.querySelectorAll('.tile');
+  tiles.forEach((t) => t.classList.remove('selected'));
+
+  // Aktuelle Pfad-Tiles markieren
+  for (const { r, c } of state.dragPath) {
+    const tile = els.board.querySelector(`.tile[data-r="${r}"][data-c="${c}"]`);
+    if (tile) tile.classList.add('selected');
+  }
+}
+
+function startDrag(r, c) {
+  if (!state.running) return;
+  state.dragging = true;
+  state.dragPath = [{ r, c }];
+  els.board.classList.add('dragging');
+  updateDragVisuals();
+}
+
+function extendDrag(r, c) {
+  if (!state.dragging || !state.running) return;
+  const path = state.dragPath;
+  const last = path[path.length - 1];
+
+  // Bereits letztes Feld — nichts tun
+  if (last.r === r && last.c === c) return;
+
+  // Backtracking: Zug zurück zum vorletzten Feld → letztes entfernen
+  if (path.length >= 2) {
+    const prev = path[path.length - 2];
+    if (prev.r === r && prev.c === c) {
+      path.pop();
+      updateDragVisuals();
+      return;
+    }
+  }
+
+  // Nur benachbarte, noch nicht besuchte Felder erlauben
+  if (!isAdjacent(last, { r, c })) return;
+  if (path.some((p) => p.r === r && p.c === c)) return;
+
+  path.push({ r, c });
+  updateDragVisuals();
+}
+
+function endDrag() {
+  if (!state.dragging) return;
+  state.dragging = false;
+  els.board.classList.remove('dragging');
+
+  const path = state.dragPath;
+  state.dragPath = [];
+  updateDragVisuals();
+
+  // Pfad zu kurz → still ignorieren
+  if (path.length < MIN_WORD_LENGTH) return;
+
+  // Wort aus den Board-Tokens zusammensetzen
+  const word = path.map(({ r, c }) => state.board[r][c]).join('');
+
+  // Validierung (wie bei Tastatureingabe, aber Pfad ist schon bekannt)
+  if (word.length < MIN_WORD_LENGTH) return;
+  if (state.foundWords.has(word)) {
+    setMessage('Bereits gefunden.', 'bad');
+    return;
+  }
+
+  // Pfad ist per Konstruktion gültig (adjacent + no revisits), keine findPath nötig
+  const points = scoreFor(word.length);
+  state.foundWords.add(word);
+  state.score += points;
+  updateScoreDisplay();
+  addWordToList(word, points);
+  flashPath(path);
+  setMessage(`+${points} Punkt${points === 1 ? '' : 'e'} für „${word.charAt(0) + word.slice(1).toLowerCase()}".`, 'good');
+}
+
+// Mouse-Events
+els.board.addEventListener('mousedown', (e) => {
+  const pos = getTileFromPoint(e.clientX, e.clientY);
+  if (pos) {
+    e.preventDefault();
+    startDrag(pos.r, pos.c);
+  }
+});
+
+els.board.addEventListener('mousemove', (e) => {
+  if (!state.dragging) return;
+  const pos = getTileFromPoint(e.clientX, e.clientY);
+  if (pos) extendDrag(pos.r, pos.c);
+});
+
+els.board.addEventListener('mouseup', () => {
+  endDrag();
+});
+
+els.board.addEventListener('mouseleave', () => {
+  endDrag();
+});
+
+// Touch-Events
+els.board.addEventListener('touchstart', (e) => {
+  const touch = e.touches[0];
+  const pos = getTileFromPoint(touch.clientX, touch.clientY);
+  if (pos) {
+    e.preventDefault();
+    startDrag(pos.r, pos.c);
+  }
+}, { passive: false });
+
+els.board.addEventListener('touchmove', (e) => {
+  if (!state.dragging) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const pos = getTileFromPoint(touch.clientX, touch.clientY);
+  if (pos) extendDrag(pos.r, pos.c);
+}, { passive: false });
+
+els.board.addEventListener('touchend', () => {
+  endDrag();
+});
+
+els.board.addEventListener('touchcancel', () => {
+  endDrag();
 });
 
 // Initialer Zustand: Brett unsichtbar (leere Felder als Platzhalter)
