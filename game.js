@@ -43,32 +43,93 @@ function scoreFor(wordLength) {
   return 11;
 }
 
+/* ===== Raum-Code & Seeded PRNG ===== */
+
+const ROOM_CODE_LENGTH = 5;
+const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne I/O/0/1 (verwechselbar)
+
+/**
+ * Mulberry32 — leichtgewichtige seeded 32-bit PRNG.
+ * Gibt eine Funktion zurück, die bei jedem Aufruf die nächste Zufallszahl [0,1) liefert.
+ */
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Wandelt einen String (Raum-Code) in eine 32-bit-Zahl um (DJB2-Hash).
+ */
+function hashCode(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Erzeugt einen zufälligen Raum-Code (5 Zeichen, z.B. "WOLF7").
+ */
+function generateRoomCode() {
+  let code = '';
+  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+    code += ROOM_CHARS[Math.floor(Math.random() * ROOM_CHARS.length)];
+  }
+  return code;
+}
+
+/**
+ * Liest den Raum-Code aus der URL (?raum=XXXXX).
+ */
+function getRoomFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('raum');
+  return code ? code.toUpperCase().replace(/[^A-Z0-9]/g, '') : null;
+}
+
+/**
+ * Schreibt den Raum-Code in die URL (ohne Neuladen).
+ */
+function setRoomInURL(code) {
+  const url = new URL(window.location);
+  url.searchParams.set('raum', code);
+  history.replaceState(null, '', url);
+}
+
 /* ===== Hilfsfunktionen ===== */
 
-function shuffle(arr) {
+function shuffle(arr, rng) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
 }
 
-function rollDie(die) {
-  return die[Math.floor(Math.random() * die.length)];
+function rollDie(die, rng) {
+  return die[Math.floor(rng() * die.length)];
 }
 
 /**
- * Erzeugt ein 4x4-Brett, indem die Würfel gemischt und gerollt werden.
+ * Erzeugt ein 4x4-Brett aus einem Raum-Code (deterministisch).
+ * @param {string} roomCode
  * @returns {string[][]} 2D-Array mit Tokens (z.B. "A", "QU", "Ä").
  */
-function generateBoard() {
-  const dice = shuffle(GERMAN_DICE);
+function generateBoard(roomCode) {
+  const rng = mulberry32(hashCode(roomCode));
+  const dice = shuffle(GERMAN_DICE, rng);
   const board = [];
   for (let r = 0; r < BOARD_SIZE; r++) {
     const row = [];
     for (let c = 0; c < BOARD_SIZE; c++) {
-      row.push(rollDie(dice[r * BOARD_SIZE + c]));
+      row.push(rollDie(dice[r * BOARD_SIZE + c], rng));
     }
     board.push(row);
   }
@@ -160,6 +221,7 @@ const state = {
   score: 0,
   foundWords: new Set(),
   timerId: null,
+  roomCode: null,
 };
 
 /* ===== DOM ===== */
@@ -180,6 +242,10 @@ const els = {
   finalScore: document.getElementById('final-score'),
   finalCount: document.getElementById('final-count'),
   restartBtn: document.getElementById('restart-btn'),
+  roomInfo: document.getElementById('room-info'),
+  roomCodeEl: document.getElementById('room-code'),
+  copyLinkBtn: document.getElementById('copy-link-btn'),
+  revealBtn: document.getElementById('reveal-btn'),
 };
 els.timerStat = els.timer.closest('.stat');
 
@@ -243,25 +309,72 @@ function addWordToList(word, points) {
 
 /* ===== Spiel-Steuerung ===== */
 
-function startGame() {
-  state.board = generateBoard();
-  state.running = true;
-  state.timeLeft = ROUND_SECONDS;
+/**
+ * Phase 1: Raum erstellen/beitreten, Code anzeigen.
+ * Brett wird noch NICHT aufgedeckt, Timer läuft noch NICHT.
+ */
+function setupRoom() {
+  // Falls ein Spiel läuft, stoppen
+  if (state.timerId) {
+    clearInterval(state.timerId);
+    state.timerId = null;
+  }
+  state.running = false;
+
+  // Raum-Code: aus URL übernehmen oder neu generieren
+  const urlRoom = getRoomFromURL();
+  if (urlRoom && !state.roomCode) {
+    state.roomCode = urlRoom;
+  } else {
+    state.roomCode = generateRoomCode();
+    setRoomInURL(state.roomCode);
+  }
+
+  state.board = generateBoard(state.roomCode);
   state.score = 0;
   state.foundWords = new Set();
+  state.timeLeft = ROUND_SECONDS;
 
   els.wordsList.innerHTML = '';
   els.wordCount.textContent = '(0)';
   els.input.value = '';
+  els.input.disabled = true;
+  els.submitBtn.disabled = true;
+  els.overlay.classList.add('hidden');
+  updateScoreDisplay();
+  updateTimerDisplay();
+
+  // Platzhalter-Brett anzeigen
+  els.board.innerHTML = '';
+  for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.style.opacity = '0.25';
+    tile.textContent = '?';
+    els.board.appendChild(tile);
+  }
+
+  // Raum-Info + "Los!"-Button anzeigen
+  els.roomCodeEl.textContent = state.roomCode;
+  els.roomInfo.classList.remove('hidden');
+  els.revealBtn.classList.remove('hidden');
+  els.startBtn.textContent = 'Neuer Raum';
+
+  setMessage('Link teilen, dann auf \u201eLos!\u201c klicken.', '');
+}
+
+/**
+ * Phase 2: Brett aufdecken, Timer starten.
+ */
+function revealBoard() {
+  state.running = true;
+
   els.input.disabled = false;
   els.submitBtn.disabled = false;
-  els.startBtn.textContent = 'Neu würfeln';
-  els.overlay.classList.add('hidden');
+  els.revealBtn.classList.add('hidden');
   setMessage('Los geht\u2019s! Viel Erfolg.', 'good');
 
   renderBoard();
-  updateScoreDisplay();
-  updateTimerDisplay();
 
   if (state.timerId) clearInterval(state.timerId);
   state.timerId = setInterval(tick, 1000);
@@ -331,8 +444,20 @@ els.form.addEventListener('submit', (e) => {
   submitWord();
 });
 
-els.startBtn.addEventListener('click', startGame);
-els.restartBtn.addEventListener('click', startGame);
+els.startBtn.addEventListener('click', setupRoom);
+els.restartBtn.addEventListener('click', setupRoom);
+els.revealBtn.addEventListener('click', revealBoard);
+
+// Link kopieren
+els.copyLinkBtn.addEventListener('click', () => {
+  const url = window.location.href;
+  navigator.clipboard.writeText(url).then(() => {
+    els.copyLinkBtn.textContent = 'Kopiert!';
+    setTimeout(() => {
+      els.copyLinkBtn.textContent = 'Link kopieren';
+    }, 2000);
+  });
+});
 
 // Eingabe nur erlaubte Zeichen filtern (Buchstaben, Umlaute, ß)
 els.input.addEventListener('input', () => {

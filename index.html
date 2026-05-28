@@ -48,11 +48,17 @@
 
     <footer class="footer">
       <button id="start-btn" class="primary">Spiel starten</button>
+      <div id="room-info" class="room-info hidden">
+        <span>Raum: <strong id="room-code">&mdash;</strong></span>
+        <button id="copy-link-btn" type="button">Link kopieren</button>
+      </div>
+      <button id="reveal-btn" class="primary hidden">Los!</button>
       <p class="hint">
         Mindestens 3 Buchstaben. Felder müssen benachbart sein
         (waagerecht, senkrecht oder diagonal). Jedes Feld nur einmal pro Wort.
         Umlaute können auch als <code>AE</code>, <code>OE</code>,
         <code>UE</code>, <code>SS</code> getippt werden.
+        <br />Teile den Link, damit andere dasselbe Brett spielen.
       </p>
     </footer>
 

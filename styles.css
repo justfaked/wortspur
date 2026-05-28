@@ -269,6 +269,43 @@ body {
   align-items: flex-start;
 }
 
+.room-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.room-info.hidden {
+  display: none;
+}
+
+.room-info strong {
+  color: var(--accent);
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+}
+
+.room-info button {
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.room-info button:hover {
+  background: var(--accent);
+  color: #1b1f24;
+}
+
 button.primary {
   padding: 12px 24px;
   border-radius: var(--radius);
@@ -279,6 +316,10 @@ button.primary {
   font-size: 1rem;
   cursor: pointer;
   transition: background 120ms ease;
+}
+
+button.primary.hidden {
+  display: none;
 }
 
 button.primary:hover {
