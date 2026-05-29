@@ -139,17 +139,11 @@ function generateBoard(roomCode) {
 /**
  * Normalisiert Benutzereingaben:
  * - Großbuchstaben
- * - AE/OE/UE/SS -> Ä/Ö/Ü/ß (optional, falls Umlaute nicht direkt eingegeben werden)
  * - Whitespace entfernen
- *
- * Hinweis: Wir normalisieren nicht, falls echte Umlaute/ß bereits enthalten sind.
  */
 function normalizeInput(raw) {
   let s = raw.trim().toUpperCase().replace(/\s+/g, '');
-  // Nur dann ersetzen, wenn keine Umlaute vorhanden sind, um Konflikte zu vermeiden.
-  if (!/[ÄÖÜß]/.test(s)) {
-    s = s.replace(/AE/g, 'Ä').replace(/OE/g, 'Ö').replace(/UE/g, 'Ü').replace(/SS/g, 'ß');
-  }
+
   return s;
 }
 
